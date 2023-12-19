@@ -545,7 +545,16 @@ namespace ClosedXML.Excel
                         stream.CopyTo(ms);
                         var vsdp = GetPropertiesFromAnchor(anchor);
 
-                        var picture = ws.AddPicture(ms, vsdp.Name, Convert.ToInt32(vsdp.Id.Value)) as XLPicture;
+                        XLPicture picture;
+                        try
+                        {
+                            picture = ws.AddPicture(ms, vsdp.Name, Convert.ToInt32(vsdp.Id.Value)) as XLPicture;
+                        }
+                        catch (ArgumentException)
+                        {
+                            continue;
+                        }
+
                         picture.RelId = imgId;
 
                         Xdr.ShapeProperties spPr = anchor.Descendants<Xdr.ShapeProperties>().First();

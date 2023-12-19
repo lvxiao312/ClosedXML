@@ -397,6 +397,10 @@ namespace ClosedXML.Excel.IO
             // But for now assume names and references point directly to a range
             var wss = pivotTableCacheDefinitionPart.PivotCacheDefinition.CacheSource.WorksheetSource;
 
+            // If cache source is unsupported, we return null instead of throwing an exception.
+            if (wss == null)
+                return null;
+
             if (!String.IsNullOrEmpty(wss.Id))
             {
                 var externalRelationship = pivotTableCacheDefinitionPart.ExternalRelationships.FirstOrDefault(er => er.Id.Equals(wss.Id));

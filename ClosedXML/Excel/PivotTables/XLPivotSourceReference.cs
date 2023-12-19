@@ -41,7 +41,7 @@ namespace ClosedXML.Excel
             if (ReferenceEquals(this, other))
                 return true;
 
-            return Nullable.Equals(Area, other.Area) && XLHelper.NameComparer.Equals(Name, other.Name);
+            return Nullable.Equals(Area, other?.Area) && XLHelper.NameComparer.Equals(Name, other?.Name);
         }
 
         public override bool Equals(object? obj)
