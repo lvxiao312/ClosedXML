@@ -957,26 +957,26 @@ namespace ClosedXML.Excel
                     var fixedNames = validateDefinedNames(definedName.Text.Split(','));
                     foreach (string area in fixedNames)
                     {
-                        if (area.Contains("["))
+                        try
                         {
-                            var ws = WorksheetsInternal.FirstOrDefault<XLWorksheet>(w => w.SheetId == (localSheetId + 1));
-                            if (ws != null)
+                            if (area.Contains("["))
                             {
-                                ws.PageSetup.PrintAreas.Add(area);
+                                var ws = WorksheetsInternal.FirstOrDefault<XLWorksheet>(w => w.SheetId == (localSheetId + 1));
+                                if (ws != null)
+                                {
+                                    ws.PageSetup.PrintAreas.Add(area);
+                                }
                             }
-                        }
-                        else
-                        {
-                            ParseReference(area, out String sheetName, out String sheetArea);
-                            if (!(sheetArea.Equals("#REF") || sheetArea.EndsWith("#REF!") || sheetArea.Length == 0 || sheetName.Length == 0))
+                            else
                             {
-                                try
+                                ParseReference(area, out String sheetName, out String sheetArea);
+                                if (!(sheetArea.Equals("#REF") || sheetArea.EndsWith("#REF!") || sheetArea.Length == 0 || sheetName.Length == 0))
                                 {
                                     WorksheetsInternal.Worksheet(sheetName).PageSetup.PrintAreas.Add(sheetArea);
                                 }
-                                catch (ArgumentException) { }
                             }
                         }
+                        catch (ArgumentException) { }
                     }
                 }
                 else if (name == "_xlnm.Print_Titles")
