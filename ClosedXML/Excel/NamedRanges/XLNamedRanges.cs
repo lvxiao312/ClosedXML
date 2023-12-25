@@ -111,6 +111,11 @@ namespace ClosedXML.Excel
                 }
             }
 
+            if (_namedRanges.TryGetValue(rangeName, out var value) && string.Join(",", value.RangeList).Equals(rangeAddress))
+            {
+                return value;
+            }
+
             var namedRange = new XLNamedRange(this, rangeName, validateName, rangeAddress, comment);
             _namedRanges.Add(rangeName, namedRange);
             return namedRange;

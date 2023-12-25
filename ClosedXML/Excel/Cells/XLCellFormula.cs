@@ -141,7 +141,7 @@ namespace ClosedXML.Excel
             if (String.IsNullOrWhiteSpace(A1))
                 A1 = GetFormula(R1C1, FormulaConversionType.R1C1ToA1, cellAddress);
 
-            if (A1.Trim()[0] == '=')
+            if (A1.Trim().FirstOrDefault() == '=')
                 return A1.Substring(1);
 
             return A1;

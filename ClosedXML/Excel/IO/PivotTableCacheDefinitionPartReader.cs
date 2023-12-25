@@ -807,7 +807,10 @@ namespace ClosedXML.Excel.IO
             {
                 var recordColumns = record.ChildElements.Count;
                 if (recordColumns != fieldsCount)
-                    throw PartStructureException.IncorrectElementsCount();
+                {
+                    ////throw PartStructureException.IncorrectElementsCount();
+                    fieldsCount = recordColumns; // Correct the fields count in case of incorrect records
+                }
 
                 for (var fieldIdx = 0; fieldIdx < fieldsCount; ++fieldIdx)
                 {

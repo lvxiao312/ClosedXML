@@ -969,7 +969,13 @@ namespace ClosedXML.Excel
                         {
                             ParseReference(area, out String sheetName, out String sheetArea);
                             if (!(sheetArea.Equals("#REF") || sheetArea.EndsWith("#REF!") || sheetArea.Length == 0 || sheetName.Length == 0))
-                                WorksheetsInternal.Worksheet(sheetName).PageSetup.PrintAreas.Add(sheetArea);
+                            {
+                                try
+                                {
+                                    WorksheetsInternal.Worksheet(sheetName).PageSetup.PrintAreas.Add(sheetArea);
+                                }
+                                catch (ArgumentException) { }
+                            }
                         }
                     }
                 }
@@ -2605,6 +2611,8 @@ namespace ClosedXML.Excel
                                 Fonts fonts, NumberingFormats numberingFormats)
         {
             if (s == null || s.CellFormats is null) return; //No Stylesheet, no Styles
+
+            if (styleIndex < 0) return; // Invalid style index
 
             var cellFormat = (CellFormat)s.CellFormats.ElementAt(styleIndex);
 
