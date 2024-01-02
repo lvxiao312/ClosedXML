@@ -552,9 +552,14 @@ namespace ClosedXML.Excel
                 return;
             }
 
-            // TODO: Only one cell, somehow
+            // Only one recalculation can be triggered at a time.
             var wb = Worksheet.Workbook;
-            wb.CalcEngine.Recalculate(wb, null);
+            if (!wb.CalcEngine.IsRecalculating)
+            {
+                wb.CalcEngine.IsRecalculating = true;
+                wb.CalcEngine.Recalculate(wb, null);
+                wb.CalcEngine.IsRecalculating = false;
+            }
         }
 
         /// <summary>

@@ -386,6 +386,11 @@ namespace ClosedXML.Excel.CalcEngine
 
             return singleCellValue;
         }
+
+        /// <summary>
+        /// Workbook recalculation status.
+        /// </summary>
+        internal bool IsRecalculating { get; set; } = false;
     }
 
     internal delegate AnyValue CalcEngineFunction(CalcContext ctx, Span<AnyValue> arg);
