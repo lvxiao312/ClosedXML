@@ -62,3 +62,79 @@ pivot cache.
    var pivot = ws.PivotTables.Add("pivot table", ws.Cell("A1"), range);
 
 Generally, this change doesn't matter, unless the table changes sizes.
+
+*******
+Sorting
+*******
+
+Sorting algorithm has been modified, so it matches Excel. It now sorts values
+first by type (number, text, logical, error, blank), then by value. Blanks are
+always last, regardless of sorting order (unless ``ignoreBlanks`` is set to
+``false``).
+
+* ``IXLSortElement`` properties no longer have setters.
+* An unused enum ``XLSortOrientation`` has been deleted.
+
+**********
+Page setup
+**********
+
+``IXLPageSetup.FirstPageNumber`` and ``IXLPageSetup.SetFirstPageNumber(int)``
+now use ``int`` type instead of ``uint``. First page number can be negative and
+``int`` is thus better (``-3`` instead of ``4294967293``).
+
+**********
+AutoFilter
+**********
+
+``IXLFilterColumn.AddFilter`` and ``IXLFilteredColumn.AddFilter`` method
+parameter type was changed from a generic ``T : IComparable<T>`` to ``XLCellValue``.
+Semantic of method was also updated to reflect how Excel actually filter column
+values.
+
+Removed setters for autofilter configuration, the setters were given access to
+internal state and the only acceptable way to set filters is through
+``IXLFilterColumn`` methods. 
+
+Following methods were removed.
+
+* ``IXLAutoFilter.Range`` setter.
+* ``IXLAutoFilter.SortColumn`` setter.
+* ``IXLAutoFilter.Sorted`` setter.
+* ``IXLAutoFilter.SortOrder`` setter.
+* ``IXLFilterColumn.FilterType`` setter.
+* ``IXLFilterColumn.SetFilterType(XLFilterType value)``
+* ``IXLFilterColumn.TopBottomValue`` setter.
+* ``IXLFilterColumn.SetTopBottomValue(Int32 value)``
+* ``IXLFilterColumn.TopBottomType`` setter.
+* ``IXLFilterColumn.SetTopBottomType(XLTopBottomType value)``
+* ``IXLFilterColumn.TopBottomPart`` setter.
+* ``IXLFilterColumn.SetTopBottomPart(XLTopBottomPart value)``
+* ``IXLFilterColumn.DynamicType`` setter.
+* ``IXLFilterColumn.SetDynamicType(XLFilterDynamicType value)``
+* ``IXLFilterColumn.DynamicValue`` setter.
+* ``IXLFilterColumn.SetDynamicValue(Double value)``
+
+Added a new type of filter (``XLFilterType.None``) that is used when autofilter
+doesn't have any filter.
+
+The filter type ``XLFilterType.DateTimeGrouping`` has been removed. It was an
+artifical type, the actual filter type is ``XLFilterType.Regular``. The removal
+allows to use regular and date time grouping in one filter column at once.
+
+The interface ``IXLDateTimeGroupFilteredColumn`` has been merged into
+``IXLFilteredColumn``. That allows to specify both date time group and values
+for regular filter in same fluent API.
+
+Methods that add/set filters now have an ``bool`` parameter ``reapply``. By
+default, it is set to ``true``. The parameter determines if the method should
+immediately reapplied modified filters to the autofilter. This makes it possile
+to configure several filters and only then call ``IXLAutoFilter.Reapply()``.
+
+*******
+IXLCell
+*******
+
+``IXLCell.GetFormattedString(CultureInfo)`` now has an optional argument for a
+culture. By default, it uses current culture in all cases (was inconsistent),
+but culture can be explicitely specified.

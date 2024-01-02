@@ -10,6 +10,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Break = DocumentFormat.OpenXml.Spreadsheet.Break;
@@ -645,8 +646,8 @@ namespace ClosedXML.Excel.IO
                 }
             }
 
-            var exlst = from c in xlWorksheet.ConditionalFormats where c.ConditionalFormatType == XLConditionalFormatType.DataBar && typeof(IXLConditionalFormat).IsAssignableFrom(c.GetType()) select c;
-            if (exlst != null && exlst.Any())
+            var exlst = xlWorksheet.ConditionalFormats.Where(c => c.ConditionalFormatType == XLConditionalFormatType.DataBar).ToArray();
+            if (exlst.Any())
             {
                 if (!worksheet.Elements<WorksheetExtensionList>().Any())
                 {
@@ -1097,7 +1098,8 @@ namespace ClosedXML.Excel.IO
 
             if (xlWorksheet.PageSetup.FirstPageNumber.HasValue)
             {
-                pageSetup.FirstPageNumber = UInt32Value.FromUInt32(xlWorksheet.PageSetup.FirstPageNumber.Value);
+                // Negative first page numbers are written as uint, e.g. -1 is 4294967295.
+                pageSetup.FirstPageNumber = UInt32Value.FromUInt32((uint)xlWorksheet.PageSetup.FirstPageNumber.Value);
                 pageSetup.UseFirstPageNumber = true;
             }
             else
@@ -1195,7 +1197,7 @@ namespace ClosedXML.Excel.IO
 
                 var rowBreaks = worksheet.Elements<RowBreaks>().First();
 
-                var existingBreaks = rowBreaks.ChildElements.OfType<Break>();
+                var existingBreaks = rowBreaks.ChildElements.OfType<Break>().ToArray();
                 var rowBreaksToDelete = existingBreaks
                     .Where(rb => !rb.Id.HasValue ||
                                  !xlWorksheet.PageSetup.RowBreaks.Contains((int)rb.Id.Value))
@@ -1242,7 +1244,7 @@ namespace ClosedXML.Excel.IO
 
                 var columnBreaks = worksheet.Elements<ColumnBreaks>().First();
 
-                var existingBreaks = columnBreaks.ChildElements.OfType<Break>();
+                var existingBreaks = columnBreaks.ChildElements.OfType<Break>().ToArray();
                 var columnBreaksToDelete = existingBreaks
                     .Where(cb => !cb.Id.HasValue ||
                                  !xlWorksheet.PageSetup.ColumnBreaks.Contains((int)cb.Id.Value))
@@ -1461,23 +1463,24 @@ namespace ClosedXML.Excel.IO
             var filterRange = xlAutoFilter.Range;
             autoFilter.Reference = filterRange.RangeAddress.ToString();
 
-            foreach (var kp in xlAutoFilter.Filters)
+            foreach (var (columnNumber, xlFilterColumn) in xlAutoFilter.Columns)
             {
-                var filterColumn = new FilterColumn { ColumnId = (UInt32)kp.Key - 1 };
-                var xlFilterColumn = xlAutoFilter.Column(kp.Key);
+                var filterColumn = new FilterColumn { ColumnId = (UInt32)columnNumber - 1 };
 
                 switch (xlFilterColumn.FilterType)
                 {
                     case XLFilterType.Custom:
                         var customFilters = new CustomFilters();
-                        foreach (var filter in kp.Value)
+                        foreach (var xlFilter in xlFilterColumn)
                         {
-                            var customFilter = new CustomFilter { Val = filter.Value.ObjectToInvariantString() };
+                            // Since OOXML allows only string, the operand for custom filter must be serialized.
+                            var filterValue = xlFilter.CustomValue.ToString(CultureInfo.InvariantCulture);
+                            var customFilter = new CustomFilter { Val = filterValue };
 
-                            if (filter.Operator != XLFilterOperator.Equal)
-                                customFilter.Operator = filter.Operator.ToOpenXml();
+                            if (xlFilter.Operator != XLFilterOperator.Equal)
+                                customFilter.Operator = xlFilter.Operator.ToOpenXml();
 
-                            if (filter.Connector == XLConnector.And)
+                            if (xlFilter.Connector == XLConnector.And)
                                 customFilters.And = true;
 
                             customFilters.Append(customFilter);
@@ -1486,26 +1489,36 @@ namespace ClosedXML.Excel.IO
                         break;
 
                     case XLFilterType.TopBottom:
-
-                        var top101 = new Top10 { Val = (double)xlFilterColumn.TopBottomValue };
-                        if (xlFilterColumn.TopBottomType == XLTopBottomType.Percent)
-                            top101.Percent = true;
-                        if (xlFilterColumn.TopBottomPart == XLTopBottomPart.Bottom)
-                            top101.Top = false;
-
+                        // Although there is FilterValue attribute, populating it seems like more
+                        // trouble than it's worth due to consistency issues. It's optional, so we
+                        // can't rely on it during load anyway.
+                        var top101 = new Top10
+                        {
+                            Val = xlFilterColumn.TopBottomValue,
+                            Percent = OpenXmlHelper.GetBooleanValue(xlFilterColumn.TopBottomType == XLTopBottomType.Percent, false),
+                            Top = OpenXmlHelper.GetBooleanValue(xlFilterColumn.TopBottomPart == XLTopBottomPart.Top, true)
+                        };
                         filterColumn.Append(top101);
                         break;
 
                     case XLFilterType.Dynamic:
-
                         var dynamicFilter = new DynamicFilter
-                        { Type = xlFilterColumn.DynamicType.ToOpenXml(), Val = xlFilterColumn.DynamicValue };
+                        {
+                            Type = xlFilterColumn.DynamicType.ToOpenXml(),
+                            Val = xlFilterColumn.DynamicValue
+                        };
                         filterColumn.Append(dynamicFilter);
                         break;
 
-                    case XLFilterType.DateTimeGrouping:
-                        var dateTimeGroupFilters = new Filters();
-                        foreach (var filter in kp.Value)
+                    case XLFilterType.Regular:
+                        var filters = new Filters();
+                        foreach (var filter in xlFilterColumn)
+                        {
+                            if (filter.Value is string s)
+                                filters.Append(new Filter { Val = s });
+                        }
+
+                        foreach (var filter in xlFilterColumn)
                         {
                             if (filter.Value is DateTime)
                             {
@@ -1522,21 +1535,15 @@ namespace ClosedXML.Excel.IO
                                 if (filter.DateTimeGrouping >= XLDateTimeGrouping.Minute) dgi.Minute = (UInt16)d.Minute;
                                 if (filter.DateTimeGrouping >= XLDateTimeGrouping.Second) dgi.Second = (UInt16)d.Second;
 
-                                dateTimeGroupFilters.Append(dgi);
+                                filters.Append(dgi);
                             }
-                        }
-                        filterColumn.Append(dateTimeGroupFilters);
-                        break;
-
-                    default:
-                        var filters = new Filters();
-                        foreach (var filter in kp.Value)
-                        {
-                            filters.Append(new Filter { Val = filter.Value.ObjectToInvariantString() });
                         }
 
                         filterColumn.Append(filters);
                         break;
+
+                    default:
+                        throw new NotSupportedException();
                 }
                 autoFilter.Append(filterColumn);
             }

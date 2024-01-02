@@ -1653,251 +1653,148 @@ namespace ClosedXML.Excel
             foreach (var filterColumn in af.Elements<FilterColumn>())
             {
                 Int32 column = (int)filterColumn.ColumnId.Value + 1;
-                if (filterColumn.CustomFilters != null)
+                var xlFilterColumn = autoFilter.Column(column);
+                if (filterColumn.CustomFilters is { } customFilters)
                 {
-                    var filterList = new List<XLFilter>();
-                    autoFilter.Column(column).FilterType = XLFilterType.Custom;
-                    autoFilter.Filters.Add(column, filterList);
-                    XLConnector connector = filterColumn.CustomFilters.And != null && filterColumn.CustomFilters.And.Value ? XLConnector.And : XLConnector.Or;
+                    xlFilterColumn.FilterType = XLFilterType.Custom;
+                    var connector = OpenXmlHelper.GetBooleanValueAsBool(customFilters.And, false) ? XLConnector.And : XLConnector.Or;
 
-                    Boolean isText = false;
-                    foreach (var filter in filterColumn.CustomFilters.OfType<CustomFilter>())
+                    foreach (var filter in customFilters.OfType<CustomFilter>())
                     {
-                        String val = filter.Val.Value;
-                        if (!Double.TryParse(val, out Double dTest))
+                        // Equal or NotEqual use wildcards, not value comparison. The rest does value comparison.
+                        // There is no filter operation for equal of numbers (maybe combine >= and <=).
+                        var op = filter.Operator is not null ? filter.Operator.Value.ToClosedXml() : XLFilterOperator.Equal;
+                        XLFilter xlFilter;
+                        var filterValue = filter.Val.Value;
+                        switch (op)
                         {
-                            isText = true;
-                            break;
-                        }
-                    }
-
-                    foreach (var filter in filterColumn.CustomFilters.OfType<CustomFilter>())
-                    {
-                        var xlFilter = new XLFilter { Connector = connector };
-                        if (filter.Operator != null)
-                            xlFilter.Operator = filter.Operator.Value.ToClosedXml();
-                        else
-                            xlFilter.Operator = XLFilterOperator.Equal;
-
-                        if (isText)
-                        {
-                            // TODO: Treat text BETWEEN functions better
-                            if (filter.Val.Value.StartsWith("*") && filter.Val.Value.EndsWith("*"))
-                            {
-                                var value = filter.Val.Value.Substring(1, filter.Val.Value.Length - 2);
-                                xlFilter.Value = filter.Val.Value;
-                                xlFilter.Condition = xlFilter.Operator == XLFilterOperator.NotEqual
-                                    ? s => !XLFilterColumn.ContainsFunction(value, s)
-                                    : s => XLFilterColumn.ContainsFunction(value, s);
-                            }
-                            else if (filter.Val.Value.StartsWith("*"))
-                            {
-                                var value = filter.Val.Value.Substring(1);
-                                xlFilter.Value = filter.Val.Value;
-                                xlFilter.Condition = xlFilter.Operator == XLFilterOperator.NotEqual
-                                    ? s => !XLFilterColumn.EndsWithFunction(value, s)
-                                    : s => XLFilterColumn.EndsWithFunction(value, s);
-                            }
-                            else if (filter.Val.Value.EndsWith("*"))
-                            {
-                                var value = filter.Val.Value.Substring(0, filter.Val.Value.Length - 1);
-                                xlFilter.Value = filter.Val.Value;
-                                xlFilter.Condition = xlFilter.Operator == XLFilterOperator.NotEqual
-                                    ? s => !XLFilterColumn.BeginsWithFunction(value, s)
-                                    : s => XLFilterColumn.BeginsWithFunction(value, s);
-                            }
-                            else
-                                xlFilter.Value = filter.Val.Value;
-                        }
-                        else
-                            xlFilter.Value = Double.Parse(filter.Val.Value, CultureInfo.InvariantCulture);
-
-                        // Unhandled instances - we should actually improve this
-                        if (xlFilter.Condition == null)
-                        {
-                            Func<Object, Boolean> condition = null;
-                            switch (xlFilter.Operator)
-                            {
-                                case XLFilterOperator.Equal:
-                                    if (isText)
-                                        condition = o => o.ToString().Equals(xlFilter.Value.ToString(), StringComparison.OrdinalIgnoreCase);
-                                    else
-                                        condition = o => (o as IComparable).CompareTo(xlFilter.Value) == 0;
-                                    break;
-
-                                case XLFilterOperator.EqualOrGreaterThan: condition = o => (o as IComparable).CompareTo(xlFilter.Value) >= 0; break;
-                                case XLFilterOperator.EqualOrLessThan: condition = o => (o as IComparable).CompareTo(xlFilter.Value) <= 0; break;
-                                case XLFilterOperator.GreaterThan: condition = o => (o as IComparable).CompareTo(xlFilter.Value) > 0; break;
-                                case XLFilterOperator.LessThan: condition = o => (o as IComparable).CompareTo(xlFilter.Value) < 0; break;
-                                case XLFilterOperator.NotEqual:
-                                    if (isText)
-                                        condition = o => !o.ToString().Equals(xlFilter.Value.ToString(), StringComparison.OrdinalIgnoreCase);
-                                    else
-                                        condition = o => (o as IComparable).CompareTo(xlFilter.Value) != 0;
-                                    break;
-                            }
-
-                            xlFilter.Condition = condition;
+                            case XLFilterOperator.Equal:
+                                xlFilter = XLFilter.CreateCustomPatternFilter(filterValue, true, connector);
+                                break;
+                            case XLFilterOperator.NotEqual:
+                                xlFilter = XLFilter.CreateCustomPatternFilter(filterValue, false, connector);
+                                break;
+                            default:
+                                // OOXML allows only string, so do your best to convert back to a properly typed
+                                // variable. It's not perfect, but let's mimic Excel.
+                                var customValue = XLCellValue.FromText(filterValue, CultureInfo.InvariantCulture);
+                                xlFilter = XLFilter.CreateCustomFilter(customValue, op, connector);
+                                break;
                         }
 
-                        filterList.Add(xlFilter);
+                        xlFilterColumn.AddFilter(xlFilter);
                     }
                 }
-                else if (filterColumn.Filters != null)
+                else if (filterColumn.Filters is { } filters)
                 {
-                    if (filterColumn.Filters.Elements().All(element => element is Filter))
-                        autoFilter.Column(column).FilterType = XLFilterType.Regular;
-                    else if (filterColumn.Filters.Elements().All(element => element is DateGroupItem))
-                        autoFilter.Column(column).FilterType = XLFilterType.DateTimeGrouping;
-                    else
-                        throw new NotSupportedException(String.Format("Mixing regular filters and date group filters in a single autofilter column is not supported. Column {0} of {1}", column, autoFilter.Range.ToString()));
-
-                    var filterList = new List<XLFilter>();
-
-                    autoFilter.Filters.Add((int)filterColumn.ColumnId.Value + 1, filterList);
-
-                    Boolean isText = false;
-                    foreach (var filter in filterColumn.Filters.OfType<Filter>())
+                    xlFilterColumn.FilterType = XLFilterType.Regular;
+                    foreach (var filter in filters.OfType<Filter>())
                     {
-                        String val = filter.Val.Value;
-                        if (!Double.TryParse(val, NumberStyles.Any, null, out Double dTest))
-                        {
-                            isText = true;
-                            break;
-                        }
+                        xlFilterColumn.AddFilter(XLFilter.CreateRegularFilter(filter.Val.Value));
                     }
 
-                    foreach (var filter in filterColumn.Filters.OfType<Filter>())
+                    foreach (var dateGroupItem in filters.OfType<DateGroupItem>())
                     {
-                        var xlFilter = new XLFilter { Connector = XLConnector.Or, Operator = XLFilterOperator.Equal };
-
-                        Func<Object, Boolean> condition;
-                        if (isText)
-                        {
-                            xlFilter.Value = filter.Val.Value;
-                            condition = o => o.ToString().Equals(xlFilter.Value.ToString(), StringComparison.OrdinalIgnoreCase);
-                        }
-                        else
-                        {
-                            xlFilter.Value = Double.Parse(filter.Val.Value, NumberStyles.Any);
-                            condition = o => (o as IComparable).CompareTo(xlFilter.Value) == 0;
-                        }
-
-                        xlFilter.Condition = condition;
-                        filterList.Add(xlFilter);
-                    }
-
-                    foreach (var dateGroupItem in filterColumn.Filters.OfType<DateGroupItem>())
-                    {
-                        bool valid = true;
-
-                        if (!(dateGroupItem.DateTimeGrouping?.HasValue ?? false))
+                        if (dateGroupItem.DateTimeGrouping is null || !dateGroupItem.DateTimeGrouping.HasValue)
                             continue;
 
-                        var xlDateGroupFilter = new XLFilter
-                        {
-                            Connector = XLConnector.Or,
-                            Operator = XLFilterOperator.Equal,
-                            DateTimeGrouping = dateGroupItem.DateTimeGrouping?.Value.ToClosedXml() ?? XLDateTimeGrouping.Year
-                        };
+                        var xlGrouping = dateGroupItem.DateTimeGrouping.Value.ToClosedXml();
+                        var year = 1900;
+                        var month = 1;
+                        var day = 1;
+                        var hour = 0;
+                        var minute = 0;
+                        var second = 0;
 
-                        int year = 1900;
-                        int month = 1;
-                        int day = 1;
-                        int hour = 0;
-                        int minute = 0;
-                        int second = 0;
+                        var valid = true;
 
-                        if (xlDateGroupFilter.DateTimeGrouping >= XLDateTimeGrouping.Year)
+                        if (xlGrouping >= XLDateTimeGrouping.Year)
                         {
-                            if (dateGroupItem?.Year?.HasValue ?? false)
-                                year = (int)dateGroupItem.Year?.Value;
+                            if (dateGroupItem.Year?.HasValue ?? false)
+                                year = dateGroupItem.Year.Value;
                             else
-                                valid &= false;
+                                valid = false;
                         }
 
-                        if (xlDateGroupFilter.DateTimeGrouping >= XLDateTimeGrouping.Month)
+                        if (xlGrouping >= XLDateTimeGrouping.Month)
                         {
-                            if (dateGroupItem?.Month?.HasValue ?? false)
-                                month = (int)dateGroupItem.Month?.Value;
+                            if (dateGroupItem.Month?.HasValue ?? false)
+                                month = dateGroupItem.Month.Value;
                             else
-                                valid &= false;
+                                valid = false;
                         }
 
-                        if (xlDateGroupFilter.DateTimeGrouping >= XLDateTimeGrouping.Day)
+                        if (xlGrouping >= XLDateTimeGrouping.Day)
                         {
-                            if (dateGroupItem?.Day?.HasValue ?? false)
-                                day = (int)dateGroupItem.Day?.Value;
+                            if (dateGroupItem.Day?.HasValue ?? false)
+                                day = dateGroupItem.Day.Value;
                             else
-                                valid &= false;
+                                valid = false;
                         }
 
-                        if (xlDateGroupFilter.DateTimeGrouping >= XLDateTimeGrouping.Hour)
+                        if (xlGrouping >= XLDateTimeGrouping.Hour)
                         {
-                            if (dateGroupItem?.Hour?.HasValue ?? false)
-                                hour = (int)dateGroupItem.Hour?.Value;
+                            if (dateGroupItem.Hour?.HasValue ?? false)
+                                hour = dateGroupItem.Hour.Value;
                             else
-                                valid &= false;
+                                valid = false;
                         }
 
-                        if (xlDateGroupFilter.DateTimeGrouping >= XLDateTimeGrouping.Minute)
+                        if (xlGrouping >= XLDateTimeGrouping.Minute)
                         {
-                            if (dateGroupItem?.Minute?.HasValue ?? false)
-                                minute = (int)dateGroupItem.Minute?.Value;
+                            if (dateGroupItem.Minute?.HasValue ?? false)
+                                minute = dateGroupItem.Minute.Value;
                             else
-                                valid &= false;
+                                valid = false;
                         }
 
-                        if (xlDateGroupFilter.DateTimeGrouping >= XLDateTimeGrouping.Second)
+                        if (xlGrouping >= XLDateTimeGrouping.Second)
                         {
-                            if (dateGroupItem?.Second?.HasValue ?? false)
-                                second = (int)dateGroupItem.Second?.Value;
+                            if (dateGroupItem.Second?.HasValue ?? false)
+                                second = dateGroupItem.Second.Value;
                             else
-                                valid &= false;
+                                valid = false;
                         }
-
-                        var date = new DateTime(year, month, day, hour, minute, second);
-                        xlDateGroupFilter.Value = date;
-
-                        xlDateGroupFilter.Condition = date2 => XLDateTimeGroupFilteredColumn.IsMatch(date, (DateTime)date2, xlDateGroupFilter.DateTimeGrouping);
 
                         if (valid)
-                            filterList.Add(xlDateGroupFilter);
+                        {
+                            var date = new DateTime(year, month, day, hour, minute, second);
+                            var xlDateGroupFilter = XLFilter.CreateDateGroupFilter(date, xlGrouping);
+                            xlFilterColumn.AddFilter(xlDateGroupFilter);
+                        }
                     }
                 }
-                else if (filterColumn.Top10 != null)
+                else if (filterColumn.Top10 is { } top10)
                 {
-                    var xlFilterColumn = autoFilter.Column(column);
-                    autoFilter.Filters.Add(column, null);
                     xlFilterColumn.FilterType = XLFilterType.TopBottom;
-                    if (filterColumn.Top10.Percent != null && filterColumn.Top10.Percent.Value)
-                        xlFilterColumn.TopBottomType = XLTopBottomType.Percent;
-                    else
-                        xlFilterColumn.TopBottomType = XLTopBottomType.Items;
+                    xlFilterColumn.TopBottomType = OpenXmlHelper.GetBooleanValueAsBool(top10.Percent, false)
+                            ? XLTopBottomType.Percent
+                            : XLTopBottomType.Items;
+                    var takeTop = OpenXmlHelper.GetBooleanValueAsBool(top10.Top, true);
+                    xlFilterColumn.TopBottomPart = takeTop ? XLTopBottomPart.Top : XLTopBottomPart.Bottom;
 
-                    if (filterColumn.Top10.Top != null && !filterColumn.Top10.Top.Value)
-                        xlFilterColumn.TopBottomPart = XLTopBottomPart.Bottom;
-                    else
-                        xlFilterColumn.TopBottomPart = XLTopBottomPart.Top;
-
-                    xlFilterColumn.TopBottomValue = (int)filterColumn.Top10.Val.Value;
+                    // Value contains how many percent or items, so it can only be int.
+                    // Filter value is optional, so we don't rely on it.
+                    var percentsOrItems = (int)top10.Val.Value;
+                    xlFilterColumn.TopBottomValue = percentsOrItems;
+                    xlFilterColumn.AddFilter(XLFilter.CreateTopBottom(takeTop, percentsOrItems));
                 }
-                else if (filterColumn.DynamicFilter != null)
+                else if (filterColumn.DynamicFilter is { } dynamicFilter)
                 {
-                    autoFilter.Filters.Add(column, null);
-                    var xlFilterColumn = autoFilter.Column(column);
                     xlFilterColumn.FilterType = XLFilterType.Dynamic;
-                    if (filterColumn.DynamicFilter.Type != null)
-                        xlFilterColumn.DynamicType = filterColumn.DynamicFilter.Type.Value.ToClosedXml();
-                    else
-                        xlFilterColumn.DynamicType = XLFilterDynamicType.AboveAverage;
+                    var dynamicType = dynamicFilter.Type is { } dynamicFilterType
+                        ? dynamicFilterType.Value.ToClosedXml()
+                        : XLFilterDynamicType.AboveAverage;
+                    var dynamicValue = filterColumn.DynamicFilter.Val.Value;
 
-                    xlFilterColumn.DynamicValue = filterColumn.DynamicFilter.Val.Value;
+                    xlFilterColumn.DynamicType = dynamicType;
+                    xlFilterColumn.DynamicValue = dynamicValue;
+                    xlFilterColumn.AddFilter(XLFilter.CreateAverage(dynamicValue, dynamicType == XLFilterDynamicType.AboveAverage));
                 }
             }
         }
 
-        private static void LoadAutoFilterSort(AutoFilter af, XLWorksheet ws, IXLAutoFilter autoFilter)
+        private static void LoadAutoFilterSort(AutoFilter af, XLWorksheet ws, XLAutoFilter autoFilter)
         {
             var sort = af.Elements<SortState>().FirstOrDefault();
             if (sort != null)
@@ -2487,7 +2384,7 @@ namespace ClosedXML.Excel
             if (pageSetup.HorizontalDpi != null) ws.PageSetup.HorizontalDpi = (Int32)pageSetup.HorizontalDpi.Value;
             if (pageSetup.VerticalDpi != null) ws.PageSetup.VerticalDpi = (Int32)pageSetup.VerticalDpi.Value;
             if (pageSetup.FirstPageNumber?.HasValue ?? false)
-                ws.PageSetup.FirstPageNumber = pageSetup.FirstPageNumber.Value;
+                ws.PageSetup.FirstPageNumber = (int)pageSetup.FirstPageNumber.Value;
         }
 
         private static void LoadPageMargins(PageMargins pageMargins, XLWorksheet ws)
